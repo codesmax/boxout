@@ -140,7 +140,7 @@ fi
 if ! docker volume inspect "$HOME_VOLUME" &>/dev/null; then
   docker run --rm \
     -v "$HOME_VOLUME:/home/sandbox" \
-    alpine chown "$(id -u):$(id -g)" /home/sandbox
+    alpine chown "1000:1000" /home/sandbox
 fi
 
 # ─── Ensure proxy is running ───────────────────────────────────────────────────
@@ -168,8 +168,6 @@ run_args=(
   -v "$(pwd):/workspace"
   -v "$HOME_VOLUME:/home/sandbox"
   -w /workspace
-  --user "$(id -u):$(id -g)"
-  -e "HOME=/home/sandbox"
   "${env_flags[@]+"${env_flags[@]}"}"
 )
 

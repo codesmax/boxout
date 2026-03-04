@@ -2,6 +2,14 @@
 set -euo pipefail
 
 if [[ -n "${HOME:-}" ]]; then
+  # ─── Seed mise tool cache on first run ───────────────────────────────────────
+  # Build-time tools live in /opt/mise-seed in the image. On first run (or after
+  # wiping the home volume) copy them into MISE_DATA_DIR so node/npm/etc. are
+  # available immediately without re-downloading.
+  if [[ ! -d "$HOME/.local/share/mise/installs" ]]; then
+    cp -rp /opt/mise-seed/. "$HOME/.local/share/mise/"
+  fi
+
   # ─── Claude Code native binary ───────────────────────────────────────────────
   # Installed into the persistent home volume so the binary survives container
   # restarts and auto-updates (which write back to the same path) actually stick.

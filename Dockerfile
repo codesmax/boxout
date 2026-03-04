@@ -24,24 +24,41 @@ RUN apt-get update && apt-get install -y \
     python3-venv \
     && rm -rf /var/lib/apt/lists/*
 
-# mise — installed to /usr/local/bin so it's on PATH for any user
-# Data dir set to /opt/mise so tool installs are world-readable
-ENV MISE_DATA_DIR=/opt/mise
+# Sandbox user — UID/GID 1000 matches the default on most Linux desktops.
+# On macOS, Docker Desktop maps container UIDs to the host user transparently.
+RUN groupadd -g 1000 sandbox \
+    && useradd -m -u 1000 -g 1000 -s /bin/bash sandbox \
+    && usermod -aG docker sandbox
+
+# mise binary installed system-wide.
+# Build-time tools go to /opt/mise-seed (owned by sandbox) so USER sandbox can
+# write there during the image build. The home volume is mounted at /home/sandbox
+# at runtime, which would hide anything installed there; /opt/mise-seed is outside
+# the home dir so it stays accessible. The entrypoint seeds MISE_DATA_DIR from
+# /opt/mise-seed on first run so tools are immediately available without a fresh
+# download, and any subsequently installed tools persist in the home volume.
+ENV MISE_DATA_DIR=/opt/mise-seed
 ENV MISE_CONFIG_DIR=/etc/mise
-RUN curl https://mise.run | MISE_INSTALL_PATH=/usr/local/bin/mise bash
+RUN curl https://mise.run | MISE_INSTALL_PATH=/usr/local/bin/mise bash \
+    && echo 'eval "$(mise activate bash)"' >> /etc/bash.bashrc \
+    && mkdir -p /opt/mise-seed /etc/mise \
+    && chown sandbox:sandbox /opt/mise-seed /etc/mise
 
-# Activate mise for all bash sessions
-RUN echo 'eval "$(mise activate bash)"' >> /etc/bash.bashrc
-
-# Install a default Node LTS via mise so claude-code/codex are available immediately
-# without needing a .mise.toml in the project
+# Install tools as sandbox so all tool files are owned correctly from the start
+USER sandbox
 RUN mise use --global node@lts && mise install
 
 # Other AI agent CLIs
 # Claude Code is installed at runtime by entrypoint.sh into the persistent home
 # volume so that auto-updates survive container restarts.
-RUN mise exec -- npm install -g @openai/codex \
-    && chmod -R a+rX /opt/mise
+RUN mise exec -- npm install -g @openai/codex
+
+# Back to root for system file installation
+USER root
+
+# At runtime, MISE_DATA_DIR lives in the home volume so tool installs persist
+# across container restarts and project-specific versions are cached.
+ENV MISE_DATA_DIR=/home/sandbox/.local/share/mise
 
 # Entrypoint handles runtime home-volume initialisation (skills, plugins, MCP config)
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
@@ -51,9 +68,9 @@ RUN chmod +x /usr/local/bin/entrypoint.sh
 COPY hooks/ /usr/local/lib/claude-hooks/
 RUN chmod +x /usr/local/lib/claude-hooks/*.sh
 
-# Any UID can run in this container — no fixed sandbox user needed
-WORKDIR /workspace
+ENV PATH="/home/sandbox/.local/share/mise/shims:$PATH"
 
-ENV PATH="/opt/mise/shims:$PATH"
+USER sandbox
+WORKDIR /workspace
 
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
