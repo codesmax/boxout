@@ -51,7 +51,7 @@ if [[ -n "${HOME:-}" ]]; then
   fi
 
   if [[ ! -e "$HOME/.claude/skills" && -d "$HOME/.claude/anthropic-skills/skills" ]]; then
-    ln -s "$HOME/.claude/anthropic-skills/skills" "$HOME/.claude/skills"
+    ln -sf "$HOME/.claude/anthropic-skills/skills" "$HOME/.claude/skills"
   fi
 fi
 
