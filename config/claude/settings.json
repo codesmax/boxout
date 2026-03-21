@@ -5,26 +5,21 @@
       "Edit(//workspace/**)",
       "Write(//workspace/**)",
       "WebSearch",
-      "Bash(git:*)",
-      "Bash(make:*)",
-      "Bash(yarn:*)",
-      "Bash(mise:*)",
-      "Bash(jq:*)",
-      "Bash(rg:*)",
-      "Bash(diff:*)"
+      "WebFetch",
+      "Bash"
     ],
     "deny": [
-      "Bash(curl:*)",
-      "Bash(wget:*)",
+      "Bash(sudo:*)",
+      "Bash(su:*)",
+      "Bash(ssh:*)",
+      "Bash(scp:*)",
       "Bash(nc:*)",
       "Bash(netcat:*)",
       "Bash(socat:*)",
-      "Bash(ssh:*)",
-      "Bash(scp:*)",
-      "Bash(rsync:*)",
-      "Bash(sudo:*)",
-      "Bash(su:*)",
-      "Bash(chown:*)"
+      "Read(**/.env)",
+      "Read(**/.env.*.*)",
+      "Read(**/*.pem)",
+      "Read(**/*.key)"
     ]
   }
 }

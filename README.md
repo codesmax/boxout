@@ -1,58 +1,50 @@
 # boxout
 
-Isolated container environment for development.
-Designed for use with AI coding agents, e.g. Claude Code, Codex.
+Isolated Docker environment for AI coding agents.
+
 Agents get full access to your project directory and outbound network,
 with Docker/Compose access via a filtered socket proxy — and nothing else.
 
 ## What's isolated
 
-| Access | Agent sees |
-|--------|-----------|
-| Filesystem | Current project dir only (`/workspace`) |
+| | Agent sees |
+|---|---|
+| Filesystem | Current project only (`/workspace`) |
 | Network | Full outbound internet |
 | Docker | Compose up/down/build/logs/exec (no delete/prune) |
-| Host filesystem | ✗ Not visible |
-| Other projects | ✗ Not visible |
-| Docker daemon | Via proxy only (destructive ops blocked) |
+| Host filesystem | Not visible |
+| Host home dir | Not visible |
+| Other projects | Not visible |
 
 ## Setup
 
-### 1. Clone / place this directory
+### 1. Place boxout somewhere on your PATH
 
 ```bash
-# e.g. keep it in your home dir
 mv boxout ~/.boxout
-```
-
-### 2. Add to your PATH
-
-```bash
-# in ~/.zshrc or ~/.bashrc
+# in ~/.zshrc or ~/.bashrc:
 export PATH="$HOME/.boxout:$PATH"
 ```
 
 Then reload: `source ~/.zshrc`
 
-### 3. Build the boxout image (once)
+### 2. Build the image (once)
 
 ```bash
 boxout --build bash
 # ctrl-d to exit after it builds
 ```
 
-### 4. Ensure Docker socket path is correct
+### 3. Verify the Docker socket path
 
-The proxy mounts `/var/run/docker.sock`. On Colima this is usually symlinked
-correctly, but verify:
+The proxy mounts `/var/run/docker.sock`. On Colima, verify:
 
 ```bash
 ls -la /var/run/docker.sock
 # should point to ~/.colima/default/docker.sock or exist directly
 ```
 
-If not symlinked, either add the symlink or edit `docker-compose.yml` to use
-the full Colima socket path:
+If not symlinked, either add the symlink or update `docker-compose.yml`:
 ```yaml
 volumes:
   - ~/.colima/default/docker.sock:/var/run/docker.sock:ro
@@ -64,81 +56,111 @@ volumes:
 # From any project directory:
 boxout claude              # Claude Code
 boxout codex               # OpenAI Codex
-boxout bash                # Interactive shell for debugging
-boxout npm run dev         # Any arbitrary command
+boxout bash                # Interactive shell
+boxout npm run dev         # Any command
 
 # Options
 boxout --build claude      # Rebuild image first
-boxout --no-proxy claude   # Skip Docker access entirely
-boxout --image my-img bash # Use a custom image
+boxout --no-proxy claude   # No Docker access
+boxout --image my-img bash # Custom image
 
 # Lifecycle
-boxout stop               # Stop the socket proxy
-boxout clean              # Stop the proxy and remove all volumes
+boxout stop                # Stop the socket proxy
+boxout clean               # Stop proxy + remove volumes
 ```
 
 ## API keys
 
-The launcher automatically forwards these env vars if set on the host:
+These env vars are automatically forwarded from the host if set:
+
 - `ANTHROPIC_API_KEY`
 - `OPENAI_API_KEY`
 - `GITHUB_TOKEN`
 - `NPM_TOKEN`
 
-Set them in your shell profile as usual — no extra config needed.
-
 ## Config persistence
 
-Agent config (auth tokens, settings) and any other files written to `$HOME`
-(`/home/boxout`) inside the container are stored in a named Docker volume
-(`boxout-home`) rather than bind-mounted from the host. This means:
+Agent config and anything written to `$HOME` inside the container lives in a
+named Docker volume (`boxout-home`), not on the host. Authenticate once; it
+persists across runs.
 
-- Config persists across boxout runs — authenticate once per volume
-- Agents cannot read or modify your host home directory
-- The container home is fully isolated from your host environment
-
-To reset the container home (e.g. to force re-auth):
+To reset (e.g. force re-auth):
 ```bash
 boxout clean
-```
-
-Or to remove just the home volume without stopping the proxy:
-```bash
+# or just the volume:
 docker volume rm boxout-home
-```
-
-## Rebuilding the image
-
-If you update the Dockerfile:
-
-```bash
-boxout --build bash
-```
-
-Or manually:
-```bash
-docker build -t boxout:latest ~/.boxout/
-```
-
-## Stopping the proxy
-
-The proxy runs persistently in the background (restarts automatically on
-Docker/Colima restart). To manage it:
-
-```bash
-boxout stop               # stop the proxy, keep volumes
-boxout clean              # stop the proxy and remove all volumes
 ```
 
 ## Customizing the Dockerfile
 
-The included Dockerfile provides:
-- **Node.js LTS** (via mise) + Claude Code + Codex CLI
-- **Python 3** (system), with per-project versions managed by mise
-- **Docker CLI + Compose** (Debian-packaged)
-- **ripgrep**, jq, git, curl, and standard build tools
+The image ships with Node.js LTS (via mise), Claude Code, Codex CLI, Python 3,
+Docker CLI + Compose, and common dev tools (ripgrep, jq, git, curl).
 
-Add whatever your projects need — language runtimes, CLIs, etc.
-The image is shared across all projects so keep it general-purpose.
-Runtime versions (Node, Python, Go, etc.) are better handled per-project
-via a `.mise.toml` file, which boxout picks up automatically.
+Add whatever your projects need. Runtime versions (Node, Python, Go, etc.) are
+better managed per-project via `.mise.toml`, which boxout picks up automatically.
+
+To rebuild after changes:
+```bash
+boxout --build bash
+```
+
+## Claude Code permissions
+
+Defaults live in `config/claude/settings.json` and sync into the container on
+every start. Since Docker is the real security boundary, the permission layer
+can be kept permissive inside it.
+
+**Allowed**
+
+- Full read/write/edit within `/workspace` — operations outside still prompt
+- All Bash commands — Docker containment makes a fine-grained allowlist more
+  friction than it's worth
+- All outbound HTTP/HTTPS (`WebFetch`, `WebSearch`)
+
+**Denied**
+
+Narrow list focused on what's meaningful even inside a container:
+
+- `sudo`, `su` — privilege escalation (the container user has no sudo access anyway)
+- `ssh`, `scp` — could open channels outside the container
+- `nc`, `netcat`, `socat` — general-purpose tunneling; no legitimate dev use
+
+**Secrets files**
+
+Claude's file tools are blocked from reading `.env`, `.env.*.*`
+(e.g. `.env.production.local`), `*.pem`, and `*.key`. `.env.example` is
+intentionally excluded and stays accessible.
+
+These rules apply to Claude's built-in file tools only, not Bash — `cat .env`
+still works. They guard against accidental reads and naive prompt injection,
+not a determined attacker.
+
+## Boxout vs Claude Code's native sandbox
+
+Claude Code ships a `/sandbox` command (bubblewrap on Linux) as an alternative
+isolation mechanism. The critical difference:
+
+**Native sandbox only wraps Bash subprocess execution.** Claude's built-in file
+tools (`Read`, `Edit`, `Write`) run directly on the host, constrained only by
+the permissions allow/deny list — not OS-level enforcement. A prompt injection
+via the Read tool can reach `~/.ssh`, `~/.aws`, or any sensitive host path.
+In boxout, those paths don't exist.
+
+| | Boxout | Native sandbox |
+|---|---|---|
+| Isolation scope | Everything — file tools + Bash + subprocesses | Bash subprocesses only |
+| Host file exposure | None | Claude's file tools hit host directly |
+| Mechanism | Docker (kernel namespaces + cgroups) | bubblewrap (unprivileged namespaces) |
+| Docker support | Full, via socket proxy | Incompatible |
+| Permission UX | Broad allow list (low friction) | `autoAllowBashIfSandboxed` auto-executes |
+| Host toolchain | Image-only | Full host tools available |
+| Per-project isolation | Clean (separate mount per project) | Shares host home + env vars |
+
+The file-tool gap and Docker incompatibility are architectural constants — not
+gaps that are likely to close in a future release.
+
+## TODO
+
+- **Docker exec scoping:** The socket proxy permits `docker exec` into any
+  running container on the host. [docker-proxy-filter](https://github.com/FoxxMD/docker-proxy-filter)
+  could add container-name allowlisting for tighter control.
