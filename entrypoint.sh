@@ -29,10 +29,10 @@ if [[ -n "${HOME:-}" ]]; then
   _src="/etc/claude/settings.json"
   _target="$HOME/.claude/settings.json"
   if [[ -f "$_src" ]]; then
-    if [[ -f "$_target" ]]; then
+    if [[ -f "$_target" ]] && jq empty "$_target" 2>/dev/null; then
       _tmp=$(mktemp)
       jq --argjson perms "$(jq '.permissions' "$_src")" '.permissions = $perms' "$_target" > "$_tmp" \
-        && mv "$_tmp" "$_target"
+        && mv "$_tmp" "$_target" || { cp "$_src" "$_target"; rm -f "$_tmp"; }
     else
       cp "$_src" "$_target"
     fi
